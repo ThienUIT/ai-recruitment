@@ -1,0 +1,70 @@
+{
+  "name": "Candidate",
+  "type": "object",
+  "properties": {
+    "full_name": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "phone": {
+      "type": "string"
+    },
+    "job_id": {
+      "type": "string"
+    },
+    "cv_url": {
+      "type": "string"
+    },
+    "parsed_data": {
+      "type": "string"
+    },
+    "ai_score": {
+      "type": "number"
+    },
+    "ai_summary": {
+      "type": "string"
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "screening",
+        "interview",
+        "offer",
+        "hired",
+        "rejected"
+      ],
+      "default": "applied"
+    },
+    "experience_years": {
+      "type": "number"
+    },
+    "skills": {
+      "type": "string"
+    },
+    "education": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "referral",
+        "linkedin",
+        "website",
+        "other"
+      ],
+      "default": "direct"
+    }
+  },
+  "required": [
+    "full_name",
+    "email",
+    "job_id"
+  ]
+}

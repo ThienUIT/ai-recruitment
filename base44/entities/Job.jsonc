@@ -1,0 +1,62 @@
+{
+  "name": "Job",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "department": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string"
+    },
+    "employment_type": {
+      "type": "string",
+      "enum": [
+        "full_time",
+        "part_time",
+        "contract",
+        "internship"
+      ],
+      "default": "full_time"
+    },
+    "salary_min": {
+      "type": "number"
+    },
+    "salary_max": {
+      "type": "number"
+    },
+    "description": {
+      "type": "string"
+    },
+    "requirements": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "open",
+        "closed",
+        "on_hold"
+      ],
+      "default": "draft"
+    },
+    "deadline": {
+      "type": "string",
+      "format": "date"
+    },
+    "experience_years": {
+      "type": "number"
+    },
+    "skills": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "title",
+    "department",
+    "status"
+  ]
+}
