@@ -89,6 +89,19 @@ def test_dify_config(monkeypatch: pytest.MonkeyPatch):
     assert Version(config.project.version) >= Version("1.0.0")
 
 
+def test_talent_intelligence_is_disabled_by_default_and_can_be_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_basic_config_env(monkeypatch)
+
+    disabled_config = DifyConfig(_env_file=None)
+    monkeypatch.setenv("TALENT_INTELLIGENCE_ENABLED", "true")
+    enabled_config = DifyConfig(_env_file=None)
+
+    assert disabled_config.TALENT_INTELLIGENCE_ENABLED is False
+    assert enabled_config.TALENT_INTELLIGENCE_ENABLED is True
+
+
 def test_http_timeout_defaults(monkeypatch: pytest.MonkeyPatch):
     """Test that HTTP timeout defaults are correctly set"""
     # clear system environment variables

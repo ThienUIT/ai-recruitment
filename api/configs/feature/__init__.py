@@ -15,6 +15,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings
 
 from .hosted_service import HostedServiceConfig
+from .talent_intelligence import TalentIntelligenceConfig
 
 
 class SecurityConfig(BaseSettings):
@@ -1518,6 +1519,7 @@ class FeatureConfig(
     RepositoryConfig,
     SandboxExpiredRecordsCleanConfig,
     SecurityConfig,
+    TalentIntelligenceConfig,
     TenantIsolatedTaskQueueConfig,
     ToolConfig,
     UpdateConfig,

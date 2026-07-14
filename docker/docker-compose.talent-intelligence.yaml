@@ -1,0 +1,21 @@
+# Build every service that executes Dify API Python code from this checkout.
+x-talent-intelligence-api: &talent-intelligence-api
+  image: dify-api-local:talent-intelligence
+  build:
+    context: ..
+    dockerfile: api/Dockerfile
+  environment:
+    TALENT_INTELLIGENCE_ENABLED: ${TALENT_INTELLIGENCE_ENABLED:-false}
+
+services:
+  api:
+    <<: *talent-intelligence-api
+
+  api_websocket:
+    <<: *talent-intelligence-api
+
+  worker:
+    <<: *talent-intelligence-api
+
+  worker_beat:
+    <<: *talent-intelligence-api
