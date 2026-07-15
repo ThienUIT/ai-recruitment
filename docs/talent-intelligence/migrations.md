@@ -2,6 +2,11 @@
 
 Migration `b8f4c2d9e731` follows the single Dify head `7a1c2d9e4b60` and creates only new `ti_` tables, indexes, constraints, and Candidate child foreign keys. It changes no existing Dify table.
 
+Corrective migration `c3d7e9f1a462` follows `b8f4c2d9e731`. It adds `ti_audit_chain_heads`, backfills
+`chain_sequence` without rewriting hashes, validates legacy chain links, installs append-only triggers, adds an
+active-policy uniqueness invariant, and replaces ID-only relationships with tenant-aware composite foreign keys. It
+fails with a diagnostic instead of silently repairing invalid chains, duplicate active policies, or cross-tenant rows.
+
 From `docker/`, inspect and apply using the local-source Compose stack:
 
 ```powershell
@@ -12,7 +17,13 @@ docker compose -f docker-compose.yaml -f docker-compose.talent-intelligence.yaml
 
 The API entrypoint also runs Dify's normal `flask upgrade-db` startup migration path. Validate table/index presence using SQLAlchemy inspection inside the API container so no database password is printed.
 
-The migration includes a reverse-order downgrade. Downgrade is destructive to Talent Intelligence data and is only appropriate for a disposable development database after backup.
+The corrective downgrade removes its triggers, function, generated column, constraints, chain-head table, and
+sequence column in dependency order while preserving AuditEvent rows. Downgrading the original `b8f4c2d9e731`
+remains destructive to Talent Intelligence data and is only appropriate for a disposable database after backup.
+
+PostgreSQL uses a PL/pgSQL rejection function and two triggers. MySQL uses equivalent `SIGNAL SQLSTATE '45000'`
+triggers. Both use a stored generated active-policy key. PostgreSQL concurrency is covered in Phase 1 integration
+tests; MySQL DDL compatibility must be rechecked whenever Dify's supported MySQL baseline changes.
 
 ## Explicit development seed
 

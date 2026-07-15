@@ -1,8 +1,8 @@
-"""Append-only, tenant-scoped audit hash chain.
+"""Database-enforced append-only, tenant-scoped audit hash chain.
 
-Phase 1 locks the latest tenant event while appending. This serializes updates
-once a chain exists, but two simultaneous first events can still race. A
-tenant-level advisory lock is reserved for the operational hardening phase.
+Every append locks a dedicated tenant chain-head row. The event insert and head
+advance share the caller's transaction, so API and worker processes serialize
+without process-local locks. Sequence numbers, not timestamps, define order.
 """
 
 import hashlib
@@ -58,6 +58,7 @@ class AuditChainVerification:
     valid: bool
     event_count: int
     first_invalid_event_id: str | None = None
+    failure_reason: str | None = None
 
 
 def _canonical_event_payload(event: AuditEvent) -> dict[str, object]:
@@ -105,12 +106,13 @@ def _validate_metadata(value: object, *, key: str | None = None) -> None:
 
 class AuditService:
     def __init__(self, session: Session) -> None:
+        self._session = session
         self._repository = AuditEventRepository(session)
 
     def append_event(self, tenant_id: str, payload: AuditAppendPayload) -> AuditEvent:
         metadata = payload.get("metadata", {})
         _validate_metadata(metadata)
-        previous = self._repository.latest_for_tenant(tenant_id, lock=True)
+        head = self._repository.lock_chain_head(tenant_id)
         event = AuditEvent(
             tenant_id=tenant_id,
             event_type=payload["event_type"],
@@ -126,21 +128,52 @@ class AuditService:
             policy_version=payload.get("policy_version"),
             model_versions=payload.get("model_versions", {}),
             metadata_=metadata,
-            previous_event_hash=previous.event_hash if previous else None,
+            previous_event_hash=head.last_event_hash,
             event_hash="",
         )
+        event.chain_sequence = head.last_sequence + 1
         event.created_at = naive_utc_now()
         event.event_hash = calculate_event_hash(event)
         self._repository.append(event)
+        # Flush only the audit row. Other pending domain writes may intentionally
+        # defer their own constraint handling until the service commit boundary.
+        self._session.flush([event])
+        head.last_event_id = event.id
+        head.last_event_hash = event.event_hash
+        head.last_sequence = event.chain_sequence
         return event
 
     def verify_chain(self, tenant_id: str) -> AuditChainVerification:
         events = self._repository.chain_for_tenant(tenant_id)
+        head = self._repository.head_for_tenant(tenant_id)
+        if not events:
+            empty_head = (
+                head is not None
+                and head.last_event_id is None
+                and head.last_event_hash is None
+                and head.last_sequence == 0
+            )
+            if head is None or empty_head:
+                return AuditChainVerification(True, 0)
+            return AuditChainVerification(False, 0, failure_reason="chain_head_not_empty")
+        if head is None:
+            return AuditChainVerification(False, len(events), events[-1].id, "chain_head_missing")
         previous_hash: str | None = None
-        for event in events:
-            if event.previous_event_hash != previous_hash or event.event_hash != calculate_event_hash(event):
-                return AuditChainVerification(False, len(events), event.id)
+        for expected_sequence, event in enumerate(events, start=1):
+            if event.chain_sequence != expected_sequence:
+                return AuditChainVerification(False, len(events), event.id, "invalid_chain_sequence")
+            if event.previous_event_hash != previous_hash:
+                return AuditChainVerification(False, len(events), event.id, "previous_hash_mismatch")
+            if event.event_hash != calculate_event_hash(event):
+                return AuditChainVerification(False, len(events), event.id, "event_hash_mismatch")
             previous_hash = event.event_hash
+        last_event = events[-1]
+        if (
+            head.last_event_id != last_event.id
+            or head.last_event_hash != last_event.event_hash
+            or head.last_sequence != last_event.chain_sequence
+        ):
+            return AuditChainVerification(False, len(events), last_event.id, "chain_head_mismatch")
         return AuditChainVerification(True, len(events))
 
     def list_events(self, tenant_id: str, *, page: int, limit: int) -> tuple[list[AuditEvent], int]:

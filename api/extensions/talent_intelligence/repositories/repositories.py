@@ -4,10 +4,13 @@ Controllers never receive unscoped lookup methods. Audit events expose append
 and read operations only; update and deletion are intentionally absent.
 """
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from ..models import AuditEvent, Candidate, CandidatePII, CandidateProfile, JobProfile, ScoringPolicy
+from ..models import AuditChainHead, AuditEvent, Candidate, CandidatePII, CandidateProfile, JobProfile, ScoringPolicy
 
 
 class CandidateRepository:
@@ -171,15 +174,14 @@ class ScoringPolicyRepository:
             .limit(1)
         )
 
-    def deactivate_name(self, tenant_id: str, name: str) -> None:
-        self._session.execute(
-            update(ScoringPolicy)
-            .where(
-                ScoringPolicy.tenant_id == tenant_id,
-                ScoringPolicy.name == name,
-                ScoringPolicy.active.is_(True),
-            )
-            .values(active=False)
+    def lock_group_for_tenant(self, tenant_id: str, name: str) -> list[ScoringPolicy]:
+        return list(
+            self._session.scalars(
+                select(ScoringPolicy)
+                .where(ScoringPolicy.tenant_id == tenant_id, ScoringPolicy.name == name)
+                .order_by(ScoringPolicy.id.asc())
+                .with_for_update()
+            ).all()
         )
 
 
@@ -190,23 +192,40 @@ class AuditEventRepository:
     def append(self, event: AuditEvent) -> None:
         self._session.add(event)
 
-    def latest_for_tenant(self, tenant_id: str, *, lock: bool = False) -> AuditEvent | None:
-        statement = (
-            select(AuditEvent)
-            .where(AuditEvent.tenant_id == tenant_id)
-            .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
-            .limit(1)
+    def lock_chain_head(self, tenant_id: str) -> AuditChainHead:
+        """Create the tenant head idempotently, then lock it for the caller's transaction."""
+
+        values = {"tenant_id": tenant_id, "last_sequence": 0}
+        dialect_name = self._session.get_bind().dialect.name
+        if dialect_name == "postgresql":
+            statement = (
+                postgresql_insert(AuditChainHead)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=[AuditChainHead.tenant_id])
+            )
+        elif dialect_name == "mysql":
+            statement = mysql_insert(AuditChainHead).values(**values).prefix_with("IGNORE")
+        else:
+            statement = (
+                sqlite_insert(AuditChainHead)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=[AuditChainHead.tenant_id])
+            )
+        self._session.execute(statement)
+        head = self._session.scalar(
+            select(AuditChainHead).where(AuditChainHead.tenant_id == tenant_id).with_for_update()
         )
-        if lock:
-            statement = statement.with_for_update()
-        return self._session.scalar(statement)
+        if head is None:
+            raise RuntimeError("Audit chain head initialization failed.")
+        return head
+
+    def head_for_tenant(self, tenant_id: str) -> AuditChainHead | None:
+        return self._session.get(AuditChainHead, tenant_id)
 
     def chain_for_tenant(self, tenant_id: str) -> list[AuditEvent]:
         return list(
             self._session.scalars(
-                select(AuditEvent)
-                .where(AuditEvent.tenant_id == tenant_id)
-                .order_by(AuditEvent.created_at.asc(), AuditEvent.id.asc())
+                select(AuditEvent).where(AuditEvent.tenant_id == tenant_id).order_by(AuditEvent.chain_sequence.asc())
             ).all()
         )
 
@@ -219,7 +238,7 @@ class AuditEventRepository:
             self._session.scalars(
                 select(AuditEvent)
                 .where(AuditEvent.tenant_id == tenant_id)
-                .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+                .order_by(AuditEvent.chain_sequence.desc())
                 .offset((page - 1) * limit)
                 .limit(limit)
             ).all()

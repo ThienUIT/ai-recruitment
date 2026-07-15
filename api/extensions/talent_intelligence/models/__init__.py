@@ -1,6 +1,7 @@
 """Talent Intelligence persistence models."""
 
 from .entities import (
+    AuditChainHead,
     AuditEvent,
     Candidate,
     CandidatePII,
@@ -12,6 +13,7 @@ from .entities import (
 )
 
 __all__ = [
+    "AuditChainHead",
     "AuditEvent",
     "Candidate",
     "CandidatePII",

@@ -70,7 +70,16 @@ docker compose -f docker-compose.yaml -f docker-compose.talent-intelligence.yaml
 
 The API startup path also runs normal Dify migrations. See `migrations.md` for head inspection, schema verification, downgrade guidance, and the explicit idempotent development seed. The seed is never run automatically.
 
+The expected Phase 1 head is `c3d7e9f1a462`. Inspect `ti_audit_chain_heads`, unique
+`(tenant_id, chain_sequence)`, append-only UPDATE/DELETE triggers, active-policy uniqueness, and composite tenant
+foreign keys after upgrade. Existing audit rows use legacy `(created_at, id)` order only during migration; runtime
+verification and listing use `chain_sequence`.
+
 After migration, recreate or restart `api`, `api_websocket`, `worker`, and `worker_beat`, then restart Nginx. Verify `/console/api/setup`, Talent Intelligence health, a candidate create/list, a job create/publish, and `/talent-intelligence/audit/verify` with an authenticated admin console session.
+
+For acceptance, record live authenticated Nginx status codes for Candidate create/get/update/deletion request,
+ScoringPolicy create/activate, JobProfile create/update/publish, audit list, and audit verification. Mocked controller
+tests do not replace this smoke test. Never print session cookies, credentials, or bearer tokens.
 
 ## Disable and verify baseline behavior
 

@@ -355,11 +355,15 @@ class ScoringPolicyService:
 
     def activate(self, tenant_id: str, account: Account, policy_id: str, correlation_id: str) -> ScoringPolicy:
         policy = self.get(tenant_id, policy_id)
-        self._repository.deactivate_name(tenant_id, policy.name)
-        policy.active = True
-        self._audit_policy(policy, account, "scoring_policy.activated", correlation_id)
+        group = self._repository.lock_group_for_tenant(tenant_id, policy.name)
+        locked_policy = next((candidate for candidate in group if candidate.id == policy_id), None)
+        if locked_policy is None:
+            raise NotFoundError("Scoring policy not found.")
+        for candidate in group:
+            candidate.active = candidate.id == locked_policy.id
+        self._audit_policy(locked_policy, account, "scoring_policy.activated", correlation_id)
         self._session.commit()
-        return policy
+        return locked_policy
 
     def _audit_policy(self, policy: ScoringPolicy, account: Account, event_type: str, correlation_id: str) -> None:
         self._audit.append_event(

@@ -1,6 +1,7 @@
 """SQLAlchemy models owned by the Talent Intelligence extension.
 
-Every table is tenant-owned. Candidate PII is deliberately isolated and its
+Every table is tenant-owned. Composite foreign keys prevent child rows from
+crossing tenant boundaries. Candidate PII is deliberately isolated and its
 encrypted columns are excluded from dataclass repr output. No model stores raw
 CV bytes or raw CV text.
 """
@@ -43,6 +44,7 @@ class Candidate(TypeBase):
     __tablename__ = "ti_candidates"
     __table_args__ = (
         sa.PrimaryKeyConstraint("id", name="ti_candidate_pkey"),
+        sa.UniqueConstraint("tenant_id", "id", name="ti_candidate_tenant_id_id_uq"),
         sa.UniqueConstraint("tenant_id", "external_reference", name="ti_candidate_tenant_external_ref_uq"),
         sa.Index("ti_candidate_tenant_created_idx", "tenant_id", "created_at"),
         sa.Index("ti_candidate_tenant_status_idx", "tenant_id", "processing_status"),
@@ -85,11 +87,17 @@ class CandidatePII(TypeBase):
     __table_args__ = (
         sa.PrimaryKeyConstraint("id", name="ti_candidate_pii_pkey"),
         sa.UniqueConstraint("candidate_id", name="ti_candidate_pii_candidate_uq"),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "candidate_id"],
+            ["ti_candidates.tenant_id", "ti_candidates.id"],
+            name="ti_candidate_pii_tenant_candidate_fk",
+            ondelete="CASCADE",
+        ),
         sa.Index("ti_candidate_pii_tenant_candidate_idx", "tenant_id", "candidate_id"),
     )
 
     id: Mapped[str] = mapped_column(StringUUID, default_factory=_uuid, init=False)
-    candidate_id: Mapped[str] = mapped_column(StringUUID, sa.ForeignKey("ti_candidates.id", ondelete="CASCADE"))
+    candidate_id: Mapped[str] = mapped_column(StringUUID)
     tenant_id: Mapped[str] = mapped_column(StringUUID, nullable=False)
     encryption_key_version: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     encrypted_name: Mapped[str | None] = mapped_column(LongText, nullable=True, default=None, repr=False)
@@ -119,11 +127,17 @@ class CandidateProfile(TypeBase):
     __table_args__ = (
         sa.PrimaryKeyConstraint("id", name="ti_candidate_profile_pkey"),
         sa.UniqueConstraint("candidate_id", name="ti_candidate_profile_candidate_uq"),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "candidate_id"],
+            ["ti_candidates.tenant_id", "ti_candidates.id"],
+            name="ti_candidate_profile_tenant_candidate_fk",
+            ondelete="CASCADE",
+        ),
         sa.Index("ti_candidate_profile_tenant_candidate_idx", "tenant_id", "candidate_id"),
     )
 
     id: Mapped[str] = mapped_column(StringUUID, default_factory=_uuid, init=False)
-    candidate_id: Mapped[str] = mapped_column(StringUUID, sa.ForeignKey("ti_candidates.id", ondelete="CASCADE"))
+    candidate_id: Mapped[str] = mapped_column(StringUUID)
     tenant_id: Mapped[str] = mapped_column(StringUUID, nullable=False)
     headline: Mapped[str | None] = mapped_column(sa.String(512), nullable=True, default=None)
     total_experience_months: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, default=None)
@@ -162,6 +176,11 @@ class JobProfile(TypeBase):
     __tablename__ = "ti_job_profiles"
     __table_args__ = (
         sa.PrimaryKeyConstraint("id", name="ti_job_profile_pkey"),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "scoring_policy_id"],
+            ["ti_scoring_policies.tenant_id", "ti_scoring_policies.id"],
+            name="ti_job_profile_tenant_policy_fk",
+        ),
         sa.Index("ti_job_profile_tenant_created_idx", "tenant_id", "created_at"),
         sa.Index("ti_job_profile_tenant_status_idx", "tenant_id", "status"),
         sa.Index("ti_job_profile_tenant_policy_idx", "tenant_id", "scoring_policy_id"),
@@ -191,7 +210,6 @@ class JobProfile(TypeBase):
     hard_requirements: Mapped[list[object]] = mapped_column(AdjustedJSON, nullable=False, default_factory=list)
     scoring_policy_id: Mapped[str | None] = mapped_column(
         StringUUID,
-        sa.ForeignKey("ti_scoring_policies.id", ondelete="SET NULL"),
         nullable=True,
         default=None,
     )
@@ -223,7 +241,9 @@ class ScoringPolicy(TypeBase):
     __tablename__ = "ti_scoring_policies"
     __table_args__ = (
         sa.PrimaryKeyConstraint("id", name="ti_scoring_policy_pkey"),
+        sa.UniqueConstraint("tenant_id", "id", name="ti_scoring_policy_tenant_id_id_uq"),
         sa.UniqueConstraint("tenant_id", "name", "version", name="ti_scoring_policy_tenant_name_version_uq"),
+        sa.UniqueConstraint("tenant_id", "active_policy_name", name="ti_scoring_policy_tenant_active_name_uq"),
         sa.Index("ti_scoring_policy_tenant_active_idx", "tenant_id", "active"),
     )
 
@@ -240,6 +260,12 @@ class ScoringPolicy(TypeBase):
     evidence_coverage_threshold: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0.7)
     confidence_rules: Mapped[dict[str, object]] = mapped_column(AdjustedJSON, nullable=False, default_factory=dict)
     active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("false"))
+    active_policy_name: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        sa.Computed("CASE WHEN active THEN name ELSE NULL END"),
+        nullable=True,
+        init=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime,
         nullable=False,
@@ -258,12 +284,13 @@ class ScoringPolicy(TypeBase):
 
 
 class AuditEvent(TypeBase):
-    """Append-only event. Mutation methods are intentionally absent from its repository."""
+    """Database-enforced append-only row in a tenant-scoped cryptographic chain."""
 
     __tablename__ = "ti_audit_events"
     __table_args__ = (
         sa.PrimaryKeyConstraint("id", name="ti_audit_event_pkey"),
         sa.UniqueConstraint("tenant_id", "event_hash", name="ti_audit_event_tenant_hash_uq"),
+        sa.UniqueConstraint("tenant_id", "chain_sequence", name="ti_audit_event_tenant_sequence_uq"),
         sa.Index("ti_audit_event_tenant_created_idx", "tenant_id", "created_at", "id"),
         sa.Index("ti_audit_event_tenant_object_idx", "tenant_id", "object_type", "object_id"),
     )
@@ -276,6 +303,7 @@ class AuditEvent(TypeBase):
     result: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     correlation_id: Mapped[str] = mapped_column(sa.String(128), nullable=False)
     event_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    chain_sequence: Mapped[int] = mapped_column(sa.BigInteger, nullable=False, init=False)
     actor_role: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, default=None)
     pseudonymous_candidate_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, default=None)
     job_id: Mapped[str | None] = mapped_column(StringUUID, nullable=True, default=None)
@@ -290,5 +318,32 @@ class AuditEvent(TypeBase):
         nullable=False,
         default_factory=naive_utc_now,
         server_default=sa.func.current_timestamp(),
+        init=False,
+    )
+
+
+class AuditChainHead(TypeBase):
+    """Per-tenant serialization row updated atomically with every audit append."""
+
+    __tablename__ = "ti_audit_chain_heads"
+    __table_args__ = (sa.PrimaryKeyConstraint("tenant_id", name="ti_audit_chain_head_pkey"),)
+
+    tenant_id: Mapped[str] = mapped_column(StringUUID)
+    last_event_id: Mapped[str | None] = mapped_column(StringUUID, nullable=True, default=None)
+    last_event_hash: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, default=None)
+    last_sequence: Mapped[int] = mapped_column(sa.BigInteger, nullable=False, default=0, server_default=sa.text("0"))
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime,
+        nullable=False,
+        default_factory=naive_utc_now,
+        server_default=sa.func.current_timestamp(),
+        init=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime,
+        nullable=False,
+        default_factory=naive_utc_now,
+        server_default=sa.func.current_timestamp(),
+        onupdate=sa.func.current_timestamp(),
         init=False,
     )

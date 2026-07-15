@@ -18,4 +18,7 @@ flowchart LR
     Service --> Repository
 ```
 
-Permission checks are centralized in `permissions/mapping.py`. Tenant isolation is separate and mandatory in every repository lookup. Cross-tenant identifiers return HTTP 404, not 403, so object existence is not disclosed.
+Permission checks are centralized in `permissions/mapping.py`. Tenant isolation is mandatory in every repository
+lookup and is reinforced by composite tenant foreign keys for Candidate children and JobProfile policy references.
+Cross-tenant identifiers return HTTP 404, not 403, so object existence is not disclosed; direct cross-tenant child
+inserts fail at the database boundary.

@@ -10,13 +10,23 @@ Candidate identifiers are tenant-salted SHA-256 pseudonyms. Metadata is recursiv
 
 ```mermaid
 flowchart LR
-    Genesis[No previous hash] --> E1[Event 1 hash]
+    Head[Locked tenant chain head] --> Genesis[No previous hash]
+    Genesis --> E1[Event 1 hash]
     E1 -->|previous_event_hash| E2[Event 2 hash]
     E2 -->|previous_event_hash| E3[Event 3 hash]
+    E3 --> UpdatedHead[Updated tenant chain head]
 ```
 
-The hash input is stable, sorted canonical JSON containing the previous hash and the event creation timestamp. Verification reads one tenant's events in deterministic `(created_at, id)` order and reports the first invalid event.
+The hash input is stable, sorted canonical JSON containing the previous hash and the event creation timestamp.
+`chain_sequence`, protected by append-only database triggers and a tenant uniqueness constraint, defines chain
+order; timestamps are not used for runtime ordering.
 
-The repository intentionally exposes append, list, latest, and chain reads only; there are no controller update/delete routes. Phase 1 does not install database triggers that prohibit privileged direct SQL mutation.
+Append initializes the tenant head with conflict-safe insert semantics, locks it with `SELECT ... FOR UPDATE`,
+assigns `last_sequence + 1`, inserts and flushes the event, and advances the head in the same transaction. Different
+tenant heads can be locked independently. This covers concurrent first events and established chains across API and
+worker processes.
 
-The latest existing row is selected `FOR UPDATE` during append. This serializes established PostgreSQL chains, but simultaneous first events for a previously empty tenant can race because there is no row to lock. A tenant-scoped advisory lock or chain-head table is required before high-volume concurrent production auditing.
+Verification checks a sequence starting at 1, gaps or duplicates, previous hashes, recalculated event hashes, and
+the final chain-head state. PostgreSQL and MySQL install `BEFORE UPDATE` and `BEFORE DELETE` rejection triggers while
+allowing inserts. This is database-enforced append-only behavior, not immutable storage: a database administrator can
+still alter or drop database objects.

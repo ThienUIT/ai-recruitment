@@ -19,6 +19,14 @@ All paths are under `/console/api`, require Dify console authentication, resolve
 
 Candidate requests reject unknown fields, including raw CV content. Candidate responses have no CandidatePII fields. CandidateProfile recursively rejects obvious email and Vietnamese phone patterns. This is defense in depth, not complete PII recognition.
 
+Phase 1 implements Candidate create/read/update plus a deletion-request transition, and JobProfile
+create/read/update plus a publish transition. It does not claim full CRUD because neither resource exposes a delete
+endpoint. CandidatePII is a restricted schema and repository boundary only; production encryption and the encrypted
+PII write flow are deferred to Phase 2.
+
 Publishing requires `original_title`, `canonical_title`, `location`, `workplace_mode`, `employment_type`, non-empty `responsibilities`, and non-empty `must_have_skills`. Generic updates cannot publish and published rows reject edits with HTTP 409.
+
+Audit list responses expose `chain_sequence`. Verification returns only validity, event count, the first invalid
+event ID, and a non-sensitive failure reason; it never returns audit metadata as a failure diagnostic.
 
 Collection responses follow Dify's direct Pydantic response model and accept `page` (minimum 1) and `limit` (1–100). Validation is HTTP 400, unauthenticated access 401, insufficient role 403, tenant-scoped missing objects 404, and invalid state/uniqueness conflicts 409.

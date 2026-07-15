@@ -243,6 +243,7 @@ class AuditEventResponse(ResponseModel):
     metadata: dict[str, object] = Field(validation_alias="metadata_")
     previous_event_hash: str | None
     event_hash: str
+    chain_sequence: int
     created_at: datetime
 
 
@@ -257,3 +258,4 @@ class AuditVerificationResponse(ResponseModel):
     valid: bool
     event_count: int
     first_invalid_event_id: str | None = None
+    failure_reason: str | None = None

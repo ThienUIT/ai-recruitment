@@ -8,11 +8,14 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy import event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from extensions.talent_intelligence.audit import AuditService
 from extensions.talent_intelligence.errors import ConflictError, NotFoundError, ValidationError
 from extensions.talent_intelligence.models import (
+    AuditChainHead,
     AuditEvent,
     Candidate,
     CandidatePII,
@@ -46,12 +49,18 @@ from models import Account
 @pytest.fixture
 def session() -> Iterator[Session]:
     engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(connection, _record) -> None:
+        connection.execute("PRAGMA foreign_keys=ON")
+
     tables: list[sa.Table] = [
         cast(sa.Table, Candidate.__table__),
         cast(sa.Table, CandidatePII.__table__),
         cast(sa.Table, CandidateProfile.__table__),
         cast(sa.Table, JobProfile.__table__),
         cast(sa.Table, ScoringPolicy.__table__),
+        cast(sa.Table, AuditChainHead.__table__),
         cast(sa.Table, AuditEvent.__table__),
     ]
     Candidate.metadata.create_all(engine, tables=tables)
@@ -226,7 +235,29 @@ def test_scoring_policy_validation_versioning_activation_and_audit(session: Sess
         ScoringPolicyCreatePayload(name="bad", criterion_weights={"skills": 99})
 
 
-def test_audit_chain_detects_tampering_and_repository_is_append_only(session: Session) -> None:
+def test_active_policy_database_invariant_and_failed_activation_are_safe(session: Session) -> None:
+    tenant_id = _id()
+    account = _account()
+    service = ScoringPolicyService(session)
+    first = service.create(tenant_id, account, ScoringPolicyCreatePayload(name="default"), "corr-1")
+    second = service.create(tenant_id, account, ScoringPolicyCreatePayload(name="default"), "corr-2")
+    service.activate(tenant_id, account, first.id, "corr-3")
+    _, audit_count_before = AuditService(session).list_events(tenant_id, page=1, limit=20)
+
+    with pytest.raises(NotFoundError):
+        service.activate(tenant_id, account, _id(), "corr-missing")
+    session.refresh(first)
+    _, audit_count_after = AuditService(session).list_events(tenant_id, page=1, limit=20)
+    assert first.active is True
+    assert audit_count_after == audit_count_before
+
+    second.active = True
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
+def test_audit_chain_detects_a_directly_inserted_malformed_test_event(session: Session) -> None:
     tenant_id = _id()
     event = AuditService(session).append_event(
         tenant_id,
@@ -242,14 +273,81 @@ def test_audit_chain_detects_tampering_and_repository_is_append_only(session: Se
     session.commit()
 
     assert AuditService(session).verify_chain(tenant_id).valid is True
-    event.result = "tampered"
+    malformed = AuditEvent(
+        tenant_id=tenant_id,
+        event_type="synthetic.malformed",
+        actor_id=_id(),
+        action="synthetic.malformed",
+        result="test-only",
+        correlation_id="corr-malformed",
+        event_hash="0" * 64,
+        previous_event_hash=event.event_hash,
+    )
+    malformed.chain_sequence = 3
+    AuditEventRepository(session).append(malformed)
     session.commit()
     verification = AuditService(session).verify_chain(tenant_id)
 
     assert verification.valid is False
-    assert verification.first_invalid_event_id == event.id
+    assert verification.first_invalid_event_id == malformed.id
+    assert verification.failure_reason == "invalid_chain_sequence"
     assert not hasattr(AuditEventRepository(session), "update")
     assert not hasattr(AuditEventRepository(session), "delete")
+
+
+def test_tenant_composite_foreign_keys_reject_cross_tenant_rows(session: Session) -> None:
+    tenant_a, tenant_b = _id(), _id()
+    account = _account()
+    candidate = CandidateService(session).create(tenant_a, account, _candidate_payload(), "corr-candidate")
+    policy = ScoringPolicyService(session).create(
+        tenant_a, account, ScoringPolicyCreatePayload(name="default"), "corr-policy"
+    )
+
+    invalid_rows = [
+        CandidatePII(
+            tenant_id=tenant_b,
+            candidate_id=candidate.id,
+            encryption_key_version="test-only",
+        ),
+        CandidateProfile(tenant_id=tenant_b, candidate_id=candidate.id),
+        JobProfile(
+            tenant_id=tenant_b,
+            created_by=account.id,
+            original_title="Cross-tenant job",
+            scoring_policy_id=policy.id,
+        ),
+    ]
+    for invalid_row in invalid_rows:
+        session.add(invalid_row)
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+def test_tenant_composite_foreign_keys_allow_same_tenant_rows(session: Session) -> None:
+    tenant_id = _id()
+    account = _account()
+    candidate = CandidateService(session).create(tenant_id, account, _candidate_payload(), "corr-candidate")
+    policy = ScoringPolicyService(session).create(
+        tenant_id, account, ScoringPolicyCreatePayload(name="default"), "corr-policy"
+    )
+    session.add_all(
+        [
+            CandidatePII(
+                tenant_id=tenant_id,
+                candidate_id=candidate.id,
+                encryption_key_version="test-only",
+            ),
+            CandidateProfile(tenant_id=tenant_id, candidate_id=candidate.id),
+            JobProfile(
+                tenant_id=tenant_id,
+                created_by=account.id,
+                original_title="Same-tenant job",
+                scoring_policy_id=policy.id,
+            ),
+        ]
+    )
+    session.commit()
 
 
 def test_permission_mapping_restricts_admin_actions() -> None:
