@@ -1,5 +1,7 @@
 # Dify core modifications
 
+Phase 2 core changes are limited to Talent Intelligence configuration, conditional Celery task/beat registration, the existing Compose override, and safe environment examples. Processing, privacy logic, persistence, APIs, and tasks remain in `api/extensions/talent_intelligence`.
+
 This register tracks changes outside feature-owned Talent Intelligence paths.
 
 | File | Reason and delegation | Conflict risk | Retest |

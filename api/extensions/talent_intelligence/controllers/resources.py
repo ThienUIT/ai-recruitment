@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 
+from configs import dify_config
 from controllers.common.schema import (
     query_params_from_model,
     query_params_from_request,
@@ -26,6 +27,8 @@ from ..schemas.domain import (
     AuditEventListResponse,
     AuditVerificationResponse,
     CandidateCreatePayload,
+    CandidateDocumentListResponse,
+    CandidateDocumentResponse,
     CandidateListResponse,
     CandidateProfilePayload,
     CandidateProfileResponse,
@@ -40,7 +43,14 @@ from ..schemas.domain import (
     ScoringPolicyListResponse,
     ScoringPolicyResponse,
 )
-from ..services import CandidateProfileService, CandidateService, JobService, ScoringPolicyService
+from ..services import (
+    CandidateDeletionService,
+    CandidateDocumentService,
+    CandidateProfileService,
+    CandidateService,
+    JobService,
+    ScoringPolicyService,
+)
 
 
 def _correlation_id() -> str:
@@ -72,7 +82,10 @@ def register_error_handlers(namespace: Namespace) -> None:
 
     @namespace.errorhandler(TalentIntelligenceError)
     def handle_domain_error(error: TalentIntelligenceError):
-        return {"message": error.description}, error.status_code
+        body = {"message": error.description}
+        if error.error_code:
+            body["error_code"] = error.error_code
+        return body, error.status_code
 
     @namespace.errorhandler(PydanticValidationError)
     def handle_validation_error(error: PydanticValidationError):
@@ -97,6 +110,8 @@ def register_domain_routes(namespace: Namespace) -> None:
         CandidateListResponse,
         CandidateProfileResponse,
         CandidateResponse,
+        CandidateDocumentListResponse,
+        CandidateDocumentResponse,
         JobListResponse,
         JobResponse,
         ScoringPolicyListResponse,
@@ -165,6 +180,91 @@ def register_domain_routes(namespace: Namespace) -> None:
                     tenant_id, account, candidate_id, _correlation_id()
                 )
                 return dump_response(CandidateResponse, candidate)
+
+    @namespace.route("/talent-intelligence/candidates/<string:candidate_id>/documents")
+    class CandidateDocumentCollectionApi(Resource):
+        @login_required
+        @namespace.response(202, "Accepted", namespace.models[CandidateDocumentResponse.__name__])
+        def post(self, candidate_id: str):
+            account, tenant_id = _context(TalentAction.MANAGE_CANDIDATE_DOCUMENT)
+            upload = request.files.get("file")
+            if upload is None:
+                raise ValidationError("Multipart field 'file' is required.", code="missing_file")
+            maximum = dify_config.TI_MAX_CV_SIZE_MB * 1024 * 1024
+            content = upload.stream.read(maximum + 1)
+            with Session(db.engine, expire_on_commit=False) as session:
+                document = CandidateDocumentService(session).upload(
+                    tenant_id,
+                    account,
+                    candidate_id,
+                    content,
+                    upload.filename,
+                    upload.content_type,
+                    _correlation_id(),
+                )
+                from ..tasks import process_candidate_document
+
+                process_candidate_document.delay(tenant_id, document.id, _correlation_id())
+                return dump_response(CandidateDocumentResponse, document), 202
+
+        @login_required
+        @namespace.response(200, "Success", namespace.models[CandidateDocumentListResponse.__name__])
+        def get(self, candidate_id: str):
+            _, tenant_id = _context(TalentAction.READ_CANDIDATE_DOCUMENT)
+            with Session(db.engine, expire_on_commit=False) as session:
+                documents = CandidateDocumentService(session).list(tenant_id, candidate_id)
+                return dump_response(CandidateDocumentListResponse, {"data": documents})
+
+    @namespace.route("/talent-intelligence/candidates/<string:candidate_id>/documents/<string:document_id>")
+    class CandidateDocumentDetailApi(Resource):
+        @login_required
+        @namespace.response(200, "Success", namespace.models[CandidateDocumentResponse.__name__])
+        def get(self, candidate_id: str, document_id: str):
+            _, tenant_id = _context(TalentAction.READ_CANDIDATE_DOCUMENT)
+            with Session(db.engine, expire_on_commit=False) as session:
+                document = CandidateDocumentService(session).get(tenant_id, candidate_id, document_id)
+                return dump_response(CandidateDocumentResponse, document)
+
+    @namespace.route("/talent-intelligence/candidates/<string:candidate_id>/documents/<string:document_id>/reprocess")
+    class CandidateDocumentReprocessApi(Resource):
+        @login_required
+        @namespace.response(202, "Accepted", namespace.models[CandidateDocumentResponse.__name__])
+        def post(self, candidate_id: str, document_id: str):
+            _, tenant_id = _context(TalentAction.MANAGE_CANDIDATE_DOCUMENT)
+            correlation_id = _correlation_id()
+            with Session(db.engine, expire_on_commit=False) as session:
+                document = CandidateDocumentService(session).reprocess(
+                    tenant_id, candidate_id, document_id, correlation_id
+                )
+                from ..tasks import process_candidate_document
+
+                process_candidate_document.delay(tenant_id, document.id, correlation_id)
+                return dump_response(CandidateDocumentResponse, document), 202
+
+    @namespace.route("/talent-intelligence/candidates/<string:candidate_id>/documents/<string:document_id>/delete-raw")
+    class CandidateDocumentRawDeletionApi(Resource):
+        @login_required
+        @namespace.response(200, "Success", namespace.models[CandidateDocumentResponse.__name__])
+        def post(self, candidate_id: str, document_id: str):
+            _, tenant_id = _context(TalentAction.MANAGE_CANDIDATE_DOCUMENT)
+            with Session(db.engine, expire_on_commit=False) as session:
+                document = CandidateDocumentService(session).delete_raw(
+                    tenant_id, candidate_id, document_id, _correlation_id()
+                )
+                return dump_response(CandidateDocumentResponse, document)
+
+    @namespace.route("/talent-intelligence/candidates/<string:candidate_id>/execute-deletion")
+    class CandidateDeletionExecutionApi(Resource):
+        @login_required
+        def post(self, candidate_id: str):
+            _, tenant_id = _context(TalentAction.EXECUTE_CANDIDATE_DELETION)
+            correlation_id = _correlation_id()
+            with Session(db.engine, expire_on_commit=False) as session:
+                CandidateDeletionService(session).ensure_exists(tenant_id, candidate_id)
+            from ..tasks import execute_candidate_deletion
+
+            execute_candidate_deletion.delay(tenant_id, candidate_id, correlation_id)
+            return {"status": "accepted", "candidate_id": candidate_id}, 202
 
     @namespace.route("/talent-intelligence/candidates/<string:candidate_id>/profile")
     class CandidateProfileApi(Resource):

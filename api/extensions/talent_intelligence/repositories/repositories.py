@@ -4,13 +4,24 @@ Controllers never receive unscoped lookup methods. Audit events expose append
 and read operations only; update and deletion are intentionally absent.
 """
 
-from sqlalchemy import func, select
+from datetime import datetime
+
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from ..models import AuditChainHead, AuditEvent, Candidate, CandidatePII, CandidateProfile, JobProfile, ScoringPolicy
+from ..models import (
+    AuditChainHead,
+    AuditEvent,
+    Candidate,
+    CandidateDocument,
+    CandidatePII,
+    CandidateProfile,
+    JobProfile,
+    ScoringPolicy,
+)
 
 
 class CandidateRepository:
@@ -27,6 +38,11 @@ class CandidateRepository:
                 Candidate.tenant_id == tenant_id,
                 Candidate.deleted_at.is_(None),
             )
+        )
+
+    def get_including_deleted_for_tenant(self, candidate_id: str, tenant_id: str) -> Candidate | None:
+        return self._session.scalar(
+            select(Candidate).where(Candidate.id == candidate_id, Candidate.tenant_id == tenant_id)
         )
 
     def get_by_external_reference_for_tenant(self, external_reference: str, tenant_id: str) -> Candidate | None:
@@ -70,6 +86,11 @@ class CandidatePIIRepository:
             )
         )
 
+    def delete_for_candidate_for_tenant(self, candidate_id: str, tenant_id: str) -> None:
+        self._session.execute(
+            delete(CandidatePII).where(CandidatePII.candidate_id == candidate_id, CandidatePII.tenant_id == tenant_id)
+        )
+
 
 class CandidateProfileRepository:
     def __init__(self, session: Session) -> None:
@@ -83,6 +104,66 @@ class CandidateProfileRepository:
             select(CandidateProfile).where(
                 CandidateProfile.candidate_id == candidate_id,
                 CandidateProfile.tenant_id == tenant_id,
+            )
+        )
+
+    def delete_for_candidate_for_tenant(self, candidate_id: str, tenant_id: str) -> None:
+        self._session.execute(
+            delete(CandidateProfile).where(
+                CandidateProfile.candidate_id == candidate_id,
+                CandidateProfile.tenant_id == tenant_id,
+            )
+        )
+
+
+class CandidateDocumentRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, document: CandidateDocument) -> None:
+        self._session.add(document)
+
+    def get_by_id_for_tenant(self, document_id: str, tenant_id: str, *, lock: bool = False) -> CandidateDocument | None:
+        statement = select(CandidateDocument).where(
+            CandidateDocument.id == document_id,
+            CandidateDocument.tenant_id == tenant_id,
+        )
+        if lock:
+            statement = statement.with_for_update()
+        return self._session.scalar(statement)
+
+    def list_for_candidate_for_tenant(self, candidate_id: str, tenant_id: str) -> list[CandidateDocument]:
+        return list(
+            self._session.scalars(
+                select(CandidateDocument)
+                .where(
+                    CandidateDocument.candidate_id == candidate_id,
+                    CandidateDocument.tenant_id == tenant_id,
+                )
+                .order_by(CandidateDocument.created_at.desc(), CandidateDocument.id.desc())
+            ).all()
+        )
+
+    def expired_raw(self, now: datetime, *, limit: int = 100) -> list[CandidateDocument]:
+        return list(
+            self._session.scalars(
+                select(CandidateDocument)
+                .where(
+                    CandidateDocument.raw_object_key.is_not(None),
+                    CandidateDocument.raw_deleted_at.is_(None),
+                    CandidateDocument.raw_delete_at <= now,
+                )
+                .order_by(CandidateDocument.raw_delete_at.asc())
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            ).all()
+        )
+
+    def delete_for_candidate_for_tenant(self, candidate_id: str, tenant_id: str) -> None:
+        self._session.execute(
+            delete(CandidateDocument).where(
+                CandidateDocument.candidate_id == candidate_id,
+                CandidateDocument.tenant_id == tenant_id,
             )
         )
 

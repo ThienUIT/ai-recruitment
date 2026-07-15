@@ -11,19 +11,27 @@ class TalentAction(enum.StrEnum):
     READ_CANDIDATE = "read_candidate"
     MANAGE_CANDIDATE = "manage_candidate"
     REQUEST_CANDIDATE_DELETION = "request_candidate_deletion"
+    EXECUTE_CANDIDATE_DELETION = "execute_candidate_deletion"
+    READ_CANDIDATE_DOCUMENT = "read_candidate_document"
+    MANAGE_CANDIDATE_DOCUMENT = "manage_candidate_document"
     READ_JOB = "read_job"
     MANAGE_JOB = "manage_job"
     MANAGE_SCORING_POLICY = "manage_scoring_policy"
     READ_AUDIT = "read_audit"
 
 
-_READ_ACTIONS = {TalentAction.READ_CANDIDATE, TalentAction.READ_JOB}
+_READ_ACTIONS = {TalentAction.READ_CANDIDATE, TalentAction.READ_CANDIDATE_DOCUMENT, TalentAction.READ_JOB}
 _EDITOR_ACTIONS = {
     TalentAction.MANAGE_CANDIDATE,
+    TalentAction.MANAGE_CANDIDATE_DOCUMENT,
     TalentAction.REQUEST_CANDIDATE_DELETION,
     TalentAction.MANAGE_JOB,
 }
-_ADMIN_ACTIONS = {TalentAction.MANAGE_SCORING_POLICY, TalentAction.READ_AUDIT}
+_ADMIN_ACTIONS = {
+    TalentAction.EXECUTE_CANDIDATE_DELETION,
+    TalentAction.MANAGE_SCORING_POLICY,
+    TalentAction.READ_AUDIT,
+}
 
 
 def require_permission(account: Account, action: TalentAction) -> None:

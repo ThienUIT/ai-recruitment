@@ -7,8 +7,9 @@ class TalentIntelligenceError(HTTPException):
     status_code = 400
     code = 400
 
-    def __init__(self, description: str) -> None:
+    def __init__(self, description: str, *, code: str | None = None) -> None:
         super().__init__(description=description)
+        self.error_code = code
 
 
 class NotFoundError(TalentIntelligenceError):
@@ -28,3 +29,13 @@ class ConflictError(TalentIntelligenceError):
 
 class ValidationError(TalentIntelligenceError):
     status_code = 400
+
+
+class PayloadTooLargeError(TalentIntelligenceError):
+    status_code = 413
+    code = 413
+
+
+class UnsupportedMediaTypeError(TalentIntelligenceError):
+    status_code = 415
+    code = 415

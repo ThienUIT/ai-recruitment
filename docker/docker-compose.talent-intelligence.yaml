@@ -6,6 +6,21 @@ x-talent-intelligence-api: &talent-intelligence-api
     dockerfile: api/Dockerfile
   environment:
     TALENT_INTELLIGENCE_ENABLED: ${TALENT_INTELLIGENCE_ENABLED:-false}
+    TI_MAX_CV_SIZE_MB: ${TI_MAX_CV_SIZE_MB:-10}
+    TI_MAX_PDF_PAGES: ${TI_MAX_PDF_PAGES:-50}
+    TI_MAX_DOCX_UNCOMPRESSED_MB: ${TI_MAX_DOCX_UNCOMPRESSED_MB:-50}
+    TI_MAX_EXTRACTED_TEXT_CHARS: ${TI_MAX_EXTRACTED_TEXT_CHARS:-500000}
+    TI_MALWARE_SCAN_ENABLED: ${TI_MALWARE_SCAN_ENABLED:-true}
+    TI_CLAMAV_HOST: ${TI_CLAMAV_HOST:-clamav}
+    TI_CLAMAV_PORT: ${TI_CLAMAV_PORT:-3310}
+    TI_ALLOW_UNSCANNED_UPLOADS_IN_DEVELOPMENT: ${TI_ALLOW_UNSCANNED_UPLOADS_IN_DEVELOPMENT:-false}
+    TI_RAW_CV_RETENTION_DAYS: ${TI_RAW_CV_RETENTION_DAYS:-7}
+    TI_DELETE_RAW_CV_AFTER_EXTRACTION: ${TI_DELETE_RAW_CV_AFTER_EXTRACTION:-false}
+    TI_TEMP_ARTIFACT_RETENTION_HOURS: ${TI_TEMP_ARTIFACT_RETENTION_HOURS:-24}
+    TI_MASK_COMPANY_NAMES: ${TI_MASK_COMPANY_NAMES:-false}
+    TI_PII_REVIEW_THRESHOLD: ${TI_PII_REVIEW_THRESHOLD:-0.70}
+    TI_PII_ACTIVE_KEY_VERSION: ${TI_PII_ACTIVE_KEY_VERSION:-v1}
+    TI_PII_ENCRYPTION_KEYS_JSON: ${TI_PII_ENCRYPTION_KEYS_JSON:-{}}
 
 services:
   api:
@@ -19,3 +34,18 @@ services:
 
   worker_beat:
     <<: *talent-intelligence-api
+
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+volumes:
+  clamav_data:

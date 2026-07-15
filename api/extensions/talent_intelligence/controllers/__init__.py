@@ -20,6 +20,13 @@ def register_console_routes(namespace: Namespace) -> bool:
     if not dify_config.TALENT_INTELLIGENCE_ENABLED:
         return False
 
+    from ..documents import PIIEncryptionProvider
+
+    PIIEncryptionProvider.from_json(
+        dify_config.TI_PII_ENCRYPTION_KEYS_JSON,
+        dify_config.TI_PII_ACTIVE_KEY_VERSION,
+    )
+
     from .health import register_health_route
     from .resources import register_domain_routes, register_error_handlers
 

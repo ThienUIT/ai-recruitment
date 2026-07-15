@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from fields.base import ResponseModel
 
-from ..models import CandidateProcessingStatus, JobStatus
+from ..models import CandidateDocumentStatus, CandidateProcessingStatus, JobStatus
 
 
 class StrictModel(BaseModel):
@@ -51,6 +51,43 @@ class CandidateListResponse(ResponseModel):
     page: int
     limit: int
     total: int
+
+
+class CandidateDocumentResponse(ResponseModel):
+    """Safe metadata contract; deliberately excludes storage keys and ciphertext."""
+
+    id: str
+    candidate_id: str
+    tenant_id: str
+    status: CandidateDocumentStatus
+    mime_type: str
+    file_extension: str
+    size_bytes: int
+    sha256: str
+    malware_scan_status: str
+    malware_scanner_version: str | None
+    parser_name: str | None
+    parser_version: str | None
+    requires_ocr: bool
+    pii_entity_counts: dict[str, object]
+    pii_risk_score: float | None
+    manual_review_required: bool
+    processing_attempts: int
+    error_code: str | None
+    safe_error_message: str | None
+    uploaded_by: str
+    uploaded_at: datetime
+    processing_started_at: datetime | None
+    processing_completed_at: datetime | None
+    raw_delete_at: datetime | None
+    raw_deleted_at: datetime | None
+    masked_deleted_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CandidateDocumentListResponse(ResponseModel):
+    data: list[CandidateDocumentResponse]
 
 
 class CandidateProfilePayload(StrictModel):

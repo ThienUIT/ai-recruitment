@@ -159,10 +159,23 @@ def init_app(app: DifyApp) -> Celery:
         "tasks.app_generate.resume_agent_app_task",  # ENG-635: Agent v2 chat ask_human resume
         "tasks.workflow_run_archive_download_tasks",  # workflow-run archive download preparation
     ]
+    if dify_config.TALENT_INTELLIGENCE_ENABLED:
+        from extensions.talent_intelligence.documents import PIIEncryptionProvider
+
+        PIIEncryptionProvider.from_json(
+            dify_config.TI_PII_ENCRYPTION_KEYS_JSON,
+            dify_config.TI_PII_ACTIVE_KEY_VERSION,
+        )
+        imports.append("extensions.talent_intelligence.tasks")
     day = dify_config.CELERY_BEAT_SCHEDULER_TIME
 
     # if you add a new task, please add the switch to CeleryScheduleTasksConfig
     beat_schedule: dict[str, CeleryBeatScheduleEntry] = {}
+    if dify_config.TALENT_INTELLIGENCE_ENABLED:
+        beat_schedule["talent-intelligence-delete-expired-raw"] = {
+            "task": "talent_intelligence.delete_expired_raw",
+            "schedule": timedelta(hours=1),
+        }
     if dify_config.ENABLE_CLEAN_EMBEDDING_CACHE_TASK:
         imports.append("schedule.clean_embedding_cache_task")
         beat_schedule["clean_embedding_cache_task"] = {

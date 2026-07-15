@@ -1,5 +1,7 @@
 # Talent Intelligence audit foundation
 
+Phase 2 adds upload, reprocess, malware, OCR-required, privacy-gate, completion/failure, raw deletion/expiry, and candidate deletion events. Metadata is limited to safe codes, versions, counts, and identifiers; it excludes filenames, content, PII, object keys, and ciphertext.
+
 Phase 1 emits these successful mutation events:
 
 - `candidate.created`, `candidate.updated`, `candidate.deletion_requested`

@@ -2,6 +2,7 @@
 
 from .repositories import (
     AuditEventRepository,
+    CandidateDocumentRepository,
     CandidatePIIRepository,
     CandidateProfileRepository,
     CandidateRepository,
@@ -11,6 +12,7 @@ from .repositories import (
 
 __all__ = [
     "AuditEventRepository",
+    "CandidateDocumentRepository",
     "CandidatePIIRepository",
     "CandidateProfileRepository",
     "CandidateRepository",

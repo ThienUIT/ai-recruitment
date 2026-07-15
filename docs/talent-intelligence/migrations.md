@@ -1,5 +1,7 @@
 # Talent Intelligence migrations
 
+Phase 2 revision `d7a9e2c4f681` follows `c3d7e9f1a462`. It creates `ti_candidate_documents` and adds restricted CandidatePII columns. Existing Phase 1 migrations are unchanged; downgrade removes Phase 2 objects only.
+
 Migration `b8f4c2d9e731` follows the single Dify head `7a1c2d9e4b60` and creates only new `ti_` tables, indexes, constraints, and Candidate child foreign keys. It changes no existing Dify table.
 
 Corrective migration `c3d7e9f1a462` follows `b8f4c2d9e731`. It adds `ti_audit_chain_heads`, backfills

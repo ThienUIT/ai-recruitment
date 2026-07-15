@@ -18,6 +18,13 @@ from models import Account
 
 def _build_app(monkeypatch: pytest.MonkeyPatch, *, enabled: bool) -> tuple[DifyApp, bool]:
     monkeypatch.setattr(dify_config, "TALENT_INTELLIGENCE_ENABLED", enabled)
+    if enabled:
+        monkeypatch.setattr(dify_config, "TI_PII_ACTIVE_KEY_VERSION", "v1")
+        monkeypatch.setattr(
+            dify_config,
+            "TI_PII_ENCRYPTION_KEYS_JSON",
+            '{"v1":"MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="}',
+        )
 
     app = DifyApp(__name__)
     app.config.update(

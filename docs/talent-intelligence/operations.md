@@ -1,5 +1,7 @@
 # Talent Intelligence local operations
 
+Phase 2 requires ClamAV `INSTREAM` and a base64-encoded 32-byte AES key supplied through secrets. Processing fails closed if scanning or encryption configuration is unavailable. The Compose override supplies ClamAV and hourly retention cleanup. Validate retention is at most seven days and never log raw payloads while troubleshooting.
+
 ## Enable the extension
 
 Do not commit `docker/.env`. Add this line to the local file:

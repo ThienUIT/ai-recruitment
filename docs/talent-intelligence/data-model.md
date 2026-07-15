@@ -1,5 +1,7 @@
 # Talent Intelligence Phase 1 data model
 
+Phase 2 adds `ti_candidate_documents` with a composite tenant-aware candidate foreign key and indexes for tenant/candidate, tenant/status, raw retention, and tenant/SHA-256. Original filenames are never stored. CandidatePII gains an encrypted placeholder map, schema version, safe detection metadata, and source document ID. Lifecycle completion remains derivable, so no redundant candidate columns were added.
+
 All tables use Dify's shared SQLAlchemy metadata, UUID representation, JSON type, and database connection. The `ti_` prefix preserves MySQL/PostgreSQL portability without introducing a PostgreSQL-only schema.
 
 ```mermaid

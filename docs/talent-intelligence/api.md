@@ -1,5 +1,16 @@
 # Talent Intelligence Phase 1 API
 
+## Phase 2 document endpoints
+
+- `POST /console/api/talent-intelligence/candidates/{candidate_id}/documents` — editor multipart upload, HTTP 202.
+- `GET /console/api/talent-intelligence/candidates/{candidate_id}/documents` — member metadata list.
+- `GET .../documents/{document_id}` — member metadata detail.
+- `POST .../{document_id}/reprocess` — editor retry, HTTP 202.
+- `POST .../{document_id}/delete-raw` — editor verified deletion.
+- `POST .../candidates/{candidate_id}/execute-deletion` — admin/owner asynchronous erasure.
+
+Responses exclude original filenames, storage keys, content, ciphertext, and placeholder maps. Cross-tenant identifiers return HTTP 404.
+
 All paths are under `/console/api`, require Dify console authentication, resolve the active tenant, and are absent when `TALENT_INTELLIGENCE_ENABLED=false`.
 
 | Method | Path | Minimum role |

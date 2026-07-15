@@ -32,6 +32,22 @@ class CandidateProcessingStatus(enum.StrEnum):
     DELETED = "deleted"
 
 
+class CandidateDocumentStatus(enum.StrEnum):
+    UPLOADED = "uploaded"
+    SCAN_PENDING = "scan_pending"
+    SCAN_CLEAN = "scan_clean"
+    INFECTED = "infected"
+    PARSING = "parsing"
+    MASKING = "masking"
+    READY = "ready"
+    PII_REVIEW_REQUIRED = "pii_review_required"
+    REQUIRES_OCR = "requires_ocr"
+    PROCESSING_FAILED = "processing_failed"
+    RAW_DELETED = "raw_deleted"
+    DELETION_REQUESTED = "deletion_requested"
+    DELETED = "deleted"
+
+
 class JobStatus(enum.StrEnum):
     DRAFT = "draft"
     IN_REVIEW = "in_review"
@@ -105,6 +121,14 @@ class CandidatePII(TypeBase):
     encrypted_phone: Mapped[str | None] = mapped_column(LongText, nullable=True, default=None, repr=False)
     encrypted_address: Mapped[str | None] = mapped_column(LongText, nullable=True, default=None, repr=False)
     encrypted_personal_urls: Mapped[str | None] = mapped_column(LongText, nullable=True, default=None, repr=False)
+    encrypted_placeholder_map: Mapped[str | None] = mapped_column(LongText, nullable=True, default=None, repr=False)
+    pii_schema_version: Mapped[str] = mapped_column(
+        sa.String(32), nullable=False, default="v1", server_default=sa.text("'v1'")
+    )
+    pii_detection_metadata: Mapped[dict[str, object]] = mapped_column(
+        AdjustedJSON, nullable=False, default_factory=dict
+    )
+    updated_from_document_id: Mapped[str | None] = mapped_column(StringUUID, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime,
         nullable=False,
@@ -155,6 +179,85 @@ class CandidateProfile(TypeBase):
     parser_version: Mapped[str | None] = mapped_column(sa.String(128), nullable=True, default=None)
     normalization_model_version: Mapped[str | None] = mapped_column(sa.String(128), nullable=True, default=None)
     warnings: Mapped[list[object]] = mapped_column(AdjustedJSON, nullable=False, default_factory=list)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime,
+        nullable=False,
+        default_factory=naive_utc_now,
+        server_default=sa.func.current_timestamp(),
+        init=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime,
+        nullable=False,
+        default_factory=naive_utc_now,
+        server_default=sa.func.current_timestamp(),
+        onupdate=sa.func.current_timestamp(),
+        init=False,
+    )
+
+
+class CandidateDocument(TypeBase):
+    """Private CV processing metadata; object keys are never API fields."""
+
+    __tablename__ = "ti_candidate_documents"
+    __table_args__ = (
+        sa.PrimaryKeyConstraint("id", name="ti_candidate_document_pkey"),
+        sa.UniqueConstraint("tenant_id", "id", name="ti_candidate_document_tenant_id_id_uq"),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "candidate_id"],
+            ["ti_candidates.tenant_id", "ti_candidates.id"],
+            name="ti_candidate_document_tenant_candidate_fk",
+            ondelete="CASCADE",
+        ),
+        sa.Index("ti_candidate_document_tenant_candidate_idx", "tenant_id", "candidate_id"),
+        sa.Index("ti_candidate_document_tenant_status_idx", "tenant_id", "status"),
+        sa.Index("ti_candidate_document_raw_delete_idx", "raw_delete_at"),
+        sa.Index("ti_candidate_document_tenant_sha256_idx", "tenant_id", "sha256"),
+    )
+
+    id: Mapped[str] = mapped_column(StringUUID, default_factory=_uuid, init=False)
+    tenant_id: Mapped[str] = mapped_column(StringUUID, nullable=False)
+    candidate_id: Mapped[str] = mapped_column(StringUUID, nullable=False)
+    mime_type: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    file_extension: Mapped[str] = mapped_column(sa.String(16), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    uploaded_by: Mapped[str] = mapped_column(StringUUID, nullable=False)
+    status: Mapped[CandidateDocumentStatus] = mapped_column(
+        EnumText(CandidateDocumentStatus, length=32),
+        nullable=False,
+        default=CandidateDocumentStatus.UPLOADED,
+        server_default=sa.text("'uploaded'"),
+    )
+    raw_object_key: Mapped[str | None] = mapped_column(sa.String(512), nullable=True, default=None, repr=False)
+    masked_artifact_object_key: Mapped[str | None] = mapped_column(
+        sa.String(512), nullable=True, default=None, repr=False
+    )
+    malware_scan_status: Mapped[str] = mapped_column(
+        sa.String(32), nullable=False, default="pending", server_default=sa.text("'pending'")
+    )
+    malware_scanner_version: Mapped[str | None] = mapped_column(sa.String(128), nullable=True, default=None)
+    parser_name: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, default=None)
+    parser_version: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, default=None)
+    requires_ocr: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.text("false")
+    )
+    pii_entity_counts: Mapped[dict[str, object]] = mapped_column(AdjustedJSON, nullable=False, default_factory=dict)
+    pii_risk_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True, default=None)
+    manual_review_required: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.text("false")
+    )
+    processing_attempts: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0, server_default=sa.text("0"))
+    error_code: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, default=None)
+    safe_error_message: Mapped[str | None] = mapped_column(sa.String(255), nullable=True, default=None)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, nullable=False, default_factory=naive_utc_now, server_default=sa.func.current_timestamp()
+    )
+    processing_started_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True, default=None)
+    processing_completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True, default=None)
+    raw_delete_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True, default=None)
+    raw_deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True, default=None)
+    masked_deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime,
         nullable=False,
