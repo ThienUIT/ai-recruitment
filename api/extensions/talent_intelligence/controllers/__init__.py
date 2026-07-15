@@ -21,8 +21,11 @@ def register_console_routes(namespace: Namespace) -> bool:
         return False
 
     from .health import register_health_route
+    from .resources import register_domain_routes, register_error_handlers
 
+    register_error_handlers(namespace)
     register_health_route(namespace)
+    register_domain_routes(namespace)
     return True
 
 

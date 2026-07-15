@@ -60,6 +60,18 @@ returns:
 
 The endpoint uses normal Dify console authentication and CSRF protection. An unauthenticated request returns HTTP 401.
 
+## Phase 1 migration and seed
+
+Apply the extension migration explicitly after building the local image:
+
+```powershell
+docker compose -f docker-compose.yaml -f docker-compose.talent-intelligence.yaml exec -T api flask db upgrade
+```
+
+The API startup path also runs normal Dify migrations. See `migrations.md` for head inspection, schema verification, downgrade guidance, and the explicit idempotent development seed. The seed is never run automatically.
+
+After migration, recreate or restart `api`, `api_websocket`, `worker`, and `worker_beat`, then restart Nginx. Verify `/console/api/setup`, Talent Intelligence health, a candidate create/list, a job create/publish, and `/talent-intelligence/audit/verify` with an authenticated admin console session.
+
 ## Disable and verify baseline behavior
 
 Set `TALENT_INTELLIGENCE_ENABLED=false` in the local environment and recreate the four services. The health path must return HTTP 404. Verify baseline Dify with:
